@@ -199,7 +199,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = message.text.strip()
 
     # Игнорируем владельца
-    if user_id == OWNER_ID and text.startswith("/"):
+    if user_id == 502740939 and text.startswith("/"):
         return
 
     save_message(user_id, "user", text)
