@@ -17,7 +17,7 @@ from telegram.ext import (
 TELEGRAM_TOKEN = "8673766414:AAG97_IplE9OaWphm__RQEiYBo7UYDHSa7A"
 GROQ_API_KEY = "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"
 
-OWNER_ID = 0  # ←←← ОБЯЗАТЕЛЬНО замени на свой реальный Telegram ID
+OWNER_ID = 502740939  # ←←← ОБЯЗАТЕЛЬНО замени на свой реальный Telegram ID
 
 EXCEL_FILE = "appointments.xlsx"
 DB_PATH = "clinic_bot.db"
@@ -199,7 +199,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = message.text.strip()
 
     # Игнорируем владельца
-    if user_id == 502740939 and text.startswith("/"):
+    if user_id == OWNER_ID and text.startswith("/"):
         return
 
     save_message(user_id, "user", text)
