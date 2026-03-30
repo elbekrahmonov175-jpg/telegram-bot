@@ -11,47 +11,41 @@ from telegram.ext import (
     filters,
 )
 
+# ==================== НАСТРОЙКИ ====================
 TELEGRAM_TOKEN = "8673766414:AAG97_IplE9OaWphm__RQEiYBo7UYDHSa7A"
 GROQ_API_KEY = "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"
-OWNER_ID = 502740939  # ← вставь сюда свой Telegram ID !!!
+OWNER_ID = 502740939                    # ←←← ВСТАВЬ СЮДА СВОЙ TELEGRAM ID !!!
 DB_PATH = "bot.db"
 
 SYSTEM_PROMPT = """ты эльбек. ты отвечаешь вместо него в телеграме в личных сообщениях.
 
-правила которые ты строго соблюдаешь:
-- отвечай агрессивно с большими текстами, матами и иногда капсом, когда к тебе обращаются грубо
-- если пользователь пишет капсом — отвечай тоже капсом
-- если пользователь пишет с матами — отвечай с матами
-- отвечай креативно, не сухо
-- никогда не отвечай на сообщения от аккаунта владельца (того, за кого ты отвечаешь)
-- пиши коротко: максимум 1-3 предложения
-- никаких заглавных букв вообще, всё строчными буквами
+правила которые строго соблюдаешь:
+- пиши только строчными буквами, никаких заглавных букв вообще
 - никаких восклицательных знаков
-- общайся как живой человек, просто и естественно
-- добавляй лёгкий юмор, когда уместно
-- поддерживай разговор, иногда задавай вопрос в ответ
+- отвечай коротко: максимум 1-2 предложения
+- если к тебе пишут грубо или с матами — отвечай агрессивно, с матами и троллингом
+- если человек пишет капсом — можешь ответить тоже капсом
+- говори естественно, как живой человек, с лёгким юмором и подколами
+- поддерживай разговор, иногда задавай вопрос
 - никогда не говори что ты бот или ии
-- отвечай на том языке, на котором пишет человек
-
-дополнительно:
-если человек пишет несколько коротких сообщений подряд (по одному-два слова), старайся понять, является ли это одним предложением/мыслью. если да — отвечай одним сообщением на всю цепочку. если сообщения явно про разное — отвечай на каждое отдельно."""
+- отвечай на том языке, на котором пишет человек"""
 
 # ==================== БАЗА ДАННЫХ ====================
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS users (
-            user_id     INTEGER PRIMARY KEY,
-            username    TEXT,
-            first_name  TEXT,
-            created_at  TEXT
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            created_at TEXT
         );
         CREATE TABLE IF NOT EXISTS messages (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id     INTEGER,
-            role        TEXT,
-            content     TEXT,
-            created_at  TEXT
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            role TEXT,
+            content TEXT,
+            created_at TEXT
         );
     """)
     conn.commit()
@@ -75,7 +69,7 @@ def save_message(user_id, role, content):
     conn.commit()
     conn.close()
 
-def get_history(user_id, limit=15):
+def get_history(user_id, limit=12):
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
         "SELECT role, content FROM messages WHERE user_id = ? ORDER BY id DESC LIMIT ?",
@@ -99,13 +93,17 @@ def ask_ai(user_id, user_message):
     
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
     
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=messages,
-        max_tokens=180,
-        temperature=0.85,
-    )
-    return response.choices[0].message.content.strip()
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            max_tokens=200,
+            temperature=0.88,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"Groq error: {e}")
+        return "бля ща не могу нормально ответить, давай чуть позже"
 
 # ==================== ОБРАБОТЧИКИ ====================
 async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -115,8 +113,8 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_history(update.effective_user.id)
     await update.message.reply_text("история очищена")
 
-# Словарь для накопления сообщений (user_id -> список сообщений + время последнего)
-pending_messages = {}
+# Словарь для накопления коротких сообщений
+pending_messages = {}  # user_id -> {"texts": [], "task": None, "chat_id": int, "business_id": str|None}
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.business_message if update.business_message else update.message
@@ -127,76 +125,81 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = user.id
     user_text = message.text.strip()
 
-    # Игнорируем сообщения от владельца (того, за кого бот отвечает)
+    # Игнорируем сообщения от владельца
     if OWNER_ID and user_id == OWNER_ID:
         return
 
     save_user(user_id, user.username or "", user.first_name or "")
     save_message(user_id, "user", user_text)
 
+    # Сохраняем информацию о чате
+    chat_id = message.chat.id
+    business_connection_id = getattr(message, 'business_connection_id', None)
+
     await context.bot.send_chat_action(
-        chat_id=message.chat.id,
+        chat_id=chat_id,
         action="typing",
-        business_connection_id=getattr(message, 'business_connection_id', None)
+        business_connection_id=business_connection_id
     )
 
     # Логика накопления коротких сообщений
     current_time = datetime.now().timestamp()
-
+    
     if user_id not in pending_messages:
-        pending_messages[user_id] = {"texts": [], "task": None, "last_time": current_time}
+        pending_messages[user_id] = {
+            "texts": [], 
+            "task": None, 
+            "chat_id": chat_id,
+            "business_id": business_connection_id,
+            "last_time": current_time
+        }
 
     pending = pending_messages[user_id]
     pending["texts"].append(user_text)
     pending["last_time"] = current_time
+    pending["chat_id"] = chat_id
+    pending["business_id"] = business_connection_id
 
-    # Если уже есть отложенная задача — отменяем её
+    # Отменяем предыдущую задачу если есть
     if pending["task"] and not pending["task"].done():
         pending["task"].cancel()
 
-    # Создаём новую задачу на ответ через 1.4 секунды
     async def delayed_reply():
-        await asyncio.sleep(1.4)  # время на сбор сообщений
+        await asyncio.sleep(1.35)
         
         if not pending["texts"]:
             return
             
         combined_text = " ".join(pending["texts"])
         
-        # Если сообщений много и они короткие — считаем одной мыслью
-        # Можно добавить более умную проверку по смыслу через ИИ, но для начала так
-        try:
-            reply = ask_ai(user_id, combined_text)
-        except Exception as e:
-            reply = f"ошибка: {e}"
-
+        reply = ask_ai(user_id, combined_text)
+        
         save_message(user_id, "assistant", reply)
-
-        await context.bot.send_message(
-            chat_id=message.chat.id,
-            text=reply,
-            business_connection_id=getattr(message, 'business_connection_id', None)
-        )
-
-        # Очищаем после ответа
+        
+        try:
+            await context.bot.send_message(
+                chat_id=pending["chat_id"],
+                text=reply,
+                business_connection_id=pending["business_id"]
+            )
+        except Exception as e:
+            print(f"Ошибка отправки сообщения: {e}")
+        
         pending["texts"].clear()
 
     pending["task"] = asyncio.create_task(delayed_reply())
 
-
 def main():
     init_db()
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
+    
     app.add_handler(CommandHandler("myid", cmd_myid))
     app.add_handler(CommandHandler("clear", cmd_clear))
     
-    # Основной обработчик всех текстовых сообщений
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
+    
     print("бот запущен!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
-
 
 if __name__ == "__main__":
     main()
