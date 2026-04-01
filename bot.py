@@ -14,21 +14,33 @@ from telegram.ext import (
 # ==================== НАСТРОЙКИ ====================
 TELEGRAM_TOKEN = "8673766414:AAG97_IplE9OaWphm__RQEiYBo7UYDHSa7A"
 GROQ_API_KEY = "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"
-OWNER_ID = 502740939                    # ←←← ВСТАВЬ СЮДА СВОЙ TELEGRAM ID !!!
+OWNER_ID = 502740939
 DB_PATH = "bot.db"
 
-SYSTEM_PROMPT = """ты эльбек. ты отвечаешь вместо него в телеграме в личных сообщениях.
+SYSTEM_PROMPT = """ты эльбек, отвечаешь вместо него в телеграме.
 
-правила которые строго соблюдаешь:
-- пиши только строчными буквами, никаких заглавных букв вообще
-- никаких восклицательных знаков
-- отвечай коротко: максимум 1-2 предложения
-- если к тебе пишут грубо или с матами — отвечай агрессивно, с матами и троллингом
-- если человек пишет капсом — можешь ответить тоже капсом
-- говори естественно, как живой человек, с лёгким юмором и подколами
-- поддерживай разговор, иногда задавай вопрос
-- никогда не говори что ты бот или ии
-- отвечай на том языке, на котором пишет человек"""
+как ты пишешь (это самое важное, строго соблюдай):
+- только строчные буквы. никогда никаких заглавных, вообще
+- никаких знаков препинания — ни точек, ни запятых, ни восклицательных. просто голый текст
+- очень коротко: 1-5 слов обычно, максимум одно предложение
+- часто пишешь одно слово как ответ: "реально", "да", "нет", "хоп", "ну", "похуй", "пиздец", "чо"
+- растягиваешь буквы для эмоций: "бляяяя", "неееет", "почемууу", "дааа", "окэээ"
+- иногда капслок для крика или удивления: "ПОЧЕМУ", "БЛЯТЬ", "НУ ТЫ ЧЕ"
+- смеёшься так: "хахахвха", "ахаха", "хвхвхв", "аэаэха" — не "хаха" и не "lol"
+- материшься часто и естественно: блять, бля, нахуй, пиздец, хуй, похуй — без стеснения
+- иногда пишешь "чо" вместо "что", "типо" вместо "типа", "ваще" вместо "вообще", "хоп" как ок
+- иногда вставляешь узбекские слова: "хоп", "ака", "жан" — если собеседник знает узбекский
+- никогда не говоришь что ты бот или ии
+- если грубят — отвечаешь агрессивно с матом
+- отвечай на том языке на котором пишут
+
+твои типичные ответы (учись у них):
+"реально", "да похуй", "пиздец", "чо блять", "ну и чо", "хоп", "не знаю нахуй",
+"бляяяя", "ты о чем", "естественно", "не стоит", "принял", "щас", "ваще красотка",
+"пошла нахуй если не нравится", "брат сказал заебись будет", "я жостко хочу к вам",
+"какая разница", "потому что хочу", "хули ты сразу не пишешь"
+
+отвечай только в своём стиле — коротко, живо, без лишних слов"""
 
 # ==================== БАЗА ДАННЫХ ====================
 def init_db():
@@ -69,7 +81,8 @@ def save_message(user_id, role, content):
     conn.commit()
     conn.close()
 
-def get_history(user_id, limit=12):
+def get_history(user_id, limit=10):
+    """История только этого конкретного пользователя"""
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
         "SELECT role, content FROM messages WHERE user_id = ? ORDER BY id DESC LIMIT ?",
@@ -88,22 +101,23 @@ def clear_history(user_id):
 client = Groq(api_key=GROQ_API_KEY)
 
 def ask_ai(user_id, user_message):
+    # История строго по user_id — каждый человек видит только свою переписку
     history = get_history(user_id)
     history.append({"role": "user", "content": user_message})
-    
+
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
-    
+
     try:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=messages,
-            max_tokens=200,
-            temperature=0.88,
+            max_tokens=80,
+            temperature=0.95,
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
         print(f"Groq error: {e}")
-        return "бля ща не могу нормально ответить, давай чуть позже"
+        return "бля щас не могу нормально ответить"
 
 # ==================== ОБРАБОТЧИКИ ====================
 async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -113,8 +127,8 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clear_history(update.effective_user.id)
     await update.message.reply_text("история очищена")
 
-# Словарь для накопления коротких сообщений
-pending_messages = {}  # user_id -> {"texts": [], "task": None, "chat_id": int, "business_id": str|None}
+# Словарь для накопления коротких сообщений — ключ user_id, изолировано по каждому
+pending_messages: dict[int, dict] = {}
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.business_message if update.business_message else update.message
@@ -130,9 +144,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     save_user(user_id, user.username or "", user.first_name or "")
-    save_message(user_id, "user", user_text)
 
-    # Сохраняем информацию о чате
     chat_id = message.chat.id
     business_connection_id = getattr(message, 'business_connection_id', None)
 
@@ -142,21 +154,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         business_connection_id=business_connection_id
     )
 
-    # Логика накопления коротких сообщений
-    current_time = datetime.now().timestamp()
-    
+    # Накопление сообщений — строго изолировано по user_id
     if user_id not in pending_messages:
         pending_messages[user_id] = {
-            "texts": [], 
-            "task": None, 
+            "texts": [],
+            "task": None,
             "chat_id": chat_id,
             "business_id": business_connection_id,
-            "last_time": current_time
         }
 
     pending = pending_messages[user_id]
     pending["texts"].append(user_text)
-    pending["last_time"] = current_time
     pending["chat_id"] = chat_id
     pending["business_id"] = business_connection_id
 
@@ -166,16 +174,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     async def delayed_reply():
         await asyncio.sleep(1.35)
-        
+
         if not pending["texts"]:
             return
-            
+
         combined_text = " ".join(pending["texts"])
-        
+        pending["texts"].clear()
+
+        # Сохраняем сообщение пользователя и получаем ответ
+        save_message(user_id, "user", combined_text)
         reply = ask_ai(user_id, combined_text)
-        
         save_message(user_id, "assistant", reply)
-        
+
         try:
             await context.bot.send_message(
                 chat_id=pending["chat_id"],
@@ -183,21 +193,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 business_connection_id=pending["business_id"]
             )
         except Exception as e:
-            print(f"Ошибка отправки сообщения: {e}")
-        
-        pending["texts"].clear()
+            print(f"Ошибка отправки: {e}")
 
     pending["task"] = asyncio.create_task(delayed_reply())
 
 def main():
     init_db()
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    
+
     app.add_handler(CommandHandler("myid", cmd_myid))
     app.add_handler(CommandHandler("clear", cmd_clear))
-    
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
+
     print("бот запущен!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
