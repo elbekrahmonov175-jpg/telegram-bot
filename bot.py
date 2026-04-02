@@ -17,8 +17,8 @@ from telegram.ext import (
 )
 
 # ==================== НАСТРОЙКИ ====================
-TELEGRAM_TOKEN = os.getenv("8673766414:AAEJphWXAwRfGS8njXWabHNuh0oT2u3LWp0")
-GROQ_API_KEY = os.getenv("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")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not TELEGRAM_TOKEN or not GROQ_API_KEY:
     raise ValueError(
