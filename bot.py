@@ -78,7 +78,7 @@ def save_message(user_id, role, content):
     conn.commit()
     conn.close()
 
-def get_history(user_id, limit=4):
+def get_history(user_id, limit=3):   # уменьшил до 3
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
         "SELECT role, content FROM messages WHERE user_id = ? ORDER BY id DESC LIMIT ?",
@@ -111,31 +111,37 @@ async def transcribe_voice(file_path: str) -> str:
         return "не смог разобрать голосовое бля"
 
 def ask_ai(user_id, user_message):
-    history = get_history(user_id, limit=4)
+    history = get_history(user_id, limit=3)
     history.append({"role": "user", "content": user_message})
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
 
     try:
+        # Основная быстрая модель
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=messages,
-            max_tokens=70,
-            temperature=0.85,
+            max_tokens=90,
+            temperature=0.9,
         )
         return response.choices[0].message.content.strip()
+
     except Exception as e:
-        logging.error(f"Groq chat error: {e}")
+        logging.error(f"Groq 8b error: {e}")
+
+        # Fallback на мощную модель
         try:
             response = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=messages,
-                max_tokens=70,
-                temperature=0.85,
+                max_tokens=90,
+                temperature=0.9,
             )
             return response.choices[0].message.content.strip()
-        except:
-            return "бля щас не могу ответить"
+
+        except Exception as e2:
+            logging.error(f"Groq 70b fallback error: {e2}")
+            return "бля лимит кончился или groq лежит, подожди немного брат"
 
 # ==================== ОБРАБОТЧИКИ ====================
 last_message_time = {}
@@ -195,8 +201,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_user(user_id, user.username, user.first_name)
     save_message(user_id, "user", text)
 
-    await message.reply_text(f"распознал:\n{text}")
-
+    # Убрал "распознал:", чтобы было чище
     reply = ask_ai(user_id, text)
     save_message(user_id, "assistant", reply)
 
@@ -250,7 +255,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pending["task"].cancel()
 
     async def delayed_reply():
-        await asyncio.sleep(1.1)
+        await asyncio.sleep(0.8)        # небольшая задержка для снижения нагрузки
         if not pending["texts"]:
             return
         combined = " ".join(pending["texts"])
@@ -282,7 +287,7 @@ def main():
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    print("бот эльбек с поддержкой голосовых запущен!")
+    print("бот эльбек запущен! (обновлённая версия)")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
