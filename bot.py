@@ -17,13 +17,8 @@ from telegram.ext import (
 )
 
 # ==================== НАСТРОЙКИ ====================
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-if not TELEGRAM_TOKEN or not GROQ_API_KEY:
-    raise ValueError(
-        "Не найдены TELEGRAM_TOKEN или GROQ_API_KEY в переменных окружения!"
-    )
+TELEGRAM_TOKEN = "8673766414:AAEJphWXAwRfGS8njXWabHNuh0oT2u3LWp0"
+GROQ_API_KEY = "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"
 
 OWNER_ID = 502740939
 DB_PATH = "bot.db"
@@ -45,7 +40,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
-# ==================== БАЗА ДАННЫХ (без изменений) ====================
+# ==================== БАЗА ДАННЫХ ====================
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.executescript("""
@@ -110,7 +105,7 @@ async def transcribe_voice(file_path: str) -> str:
                 file=(os.path.basename(file_path), audio_file.read()),
                 model="whisper-large-v3",
                 response_format="text",
-                language="ru",          # можно убрать или поставить "auto"
+                language="ru",
             )
         return transcription.strip()
     except Exception as e:
@@ -156,7 +151,6 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("история очищена")
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка голосовых сообщений"""
     message = update.business_message or update.message
     if not message or not message.voice:
         return
@@ -167,14 +161,13 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if OWNER_ID and user_id == OWNER_ID:
         return
 
-    # Анти-спам
     now = time.time()
     if user_id in last_message_time and now - last_message_time[user_id] < 1.5:
         return
     last_message_time[user_id] = now
 
     voice = message.voice
-    if voice.duration > 70:  # ограничение по длительности
+    if voice.duration > 70:
         await message.reply_text("голосовое слишком длинное брат")
         return
 
@@ -185,16 +178,13 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id=chat_id, action="typing", business_connection_id=business_connection_id
     )
 
-    # Скачиваем файл
     file = await context.bot.get_file(voice.file_id)
     file_path = os.path.join(TEMP_DIR, f"voice_{user_id}_{int(time.time())}.ogg")
 
     await file.download_to_drive(file_path)
 
-    # Транскрибируем
     text = await transcribe_voice(file_path)
 
-    # Удаляем временный файл
     try:
         os.remove(file_path)
     except:
@@ -204,14 +194,11 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text("ничего не разобрал")
         return
 
-    # Сохраняем как обычное сообщение пользователя
     save_user(user_id, user.username, user.first_name)
     save_message(user_id, "user", text)
 
-    # Отправляем транскрипт пользователю (для удобства)
     await message.reply_text(f"распознал:\n{text}")
 
-    # Генерируем ответ в стиле Эльбека
     reply = ask_ai(user_id, text)
     save_message(user_id, "assistant", reply)
 
@@ -225,7 +212,6 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Ошибка отправки: {e}")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обычная обработка текстовых сообщений (оставил почти как было)"""
     message = update.business_message or update.message
     if not message or not message.text:
         return
@@ -254,9 +240,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id=chat_id, action="typing", business_connection_id=business_connection_id
     )
 
-    # ... (твой старый код с pending_messages для объединения быстрых сообщений)
     if user_id not in pending_messages:
-        pending_messages[user_id] = {"texts": [], "task": None, "chat_id": chat_id, "business_id": business_connection_id}
+        pending_messages[user_id] = {
+            "texts": [], 
+            "task": None, 
+            "chat_id": chat_id, 
+            "business_id": business_connection_id
+        }
 
     pending = pending_messages[user_id]
     pending["texts"].append(user_text)
@@ -291,13 +281,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== ЗАПУСК ====================
 def main():
     init_db()
-
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler("myid", cmd_myid))
     app.add_handler(CommandHandler("clear", cmd_clear))
 
-    # Обработчики
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
