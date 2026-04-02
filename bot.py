@@ -4,7 +4,6 @@ import os
 import time
 import logging
 from datetime import datetime
-import aiofiles
 
 from groq import Groq
 from telegram import Update
@@ -98,7 +97,6 @@ def clear_history(user_id):
 client = Groq(api_key=GROQ_API_KEY)
 
 async def transcribe_voice(file_path: str) -> str:
-    """Транскрипция голосового сообщения через Groq Whisper"""
     try:
         with open(file_path, "rb") as audio_file:
             transcription = client.audio.transcriptions.create(
@@ -190,7 +188,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         pass
 
-    if not text:
+    if not text or len(text) < 2:
         await message.reply_text("ничего не разобрал")
         return
 
@@ -241,12 +239,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     if user_id not in pending_messages:
-        pending_messages[user_id] = {
-            "texts": [], 
-            "task": None, 
-            "chat_id": chat_id, 
-            "business_id": business_connection_id
-        }
+        pending_messages[user_id] = {"texts": [], "task": None, "chat_id": chat_id, "business_id": business_connection_id}
 
     pending = pending_messages[user_id]
     pending["texts"].append(user_text)
