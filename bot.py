@@ -20,7 +20,8 @@ from telegram.ext import (
 # ❗ токены теперь берутся из переменных окружения
 TELEGRAM_TOKEN = os.getenv("8673766414:AAG97_IplE9OaWphm__RQEiYBo7UYDHSa7A")
 GROQ_API_KEY = os.getenv("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")
-
+TELEGRAM_TOKEN = 8673766414:AAG97_IplE9OaWphm__RQEiYBo7UYDHSa7A
+GROQ_API_KEY = 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
 OWNER_ID = 502740939
 DB_PATH = "bot.db"
 
