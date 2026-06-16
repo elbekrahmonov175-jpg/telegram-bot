@@ -5,7 +5,8 @@ import time
 import logging
 from datetime import datetime
 
-from groq import Groq
+from google import genai
+from google.genai import types
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -17,7 +18,9 @@ from telegram.ext import (
 
 # ==================== НАСТРОЙКИ ====================
 TELEGRAM_TOKEN = "8673766414:AAEJphWXAwRfGS8njXWabHNuh0oT2u3LWp0"
-GROQ_API_KEY = "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"
+
+# Ключ с aistudio.google.com -> "Get API key". Бесплатный, без биллинга.
+GEMINI_API_KEY = "ВСТАВЬ_СЮДА_СВОЙ_КЛЮЧ"
 
 OWNER_ID = 502740939
 DB_PATH = "bot.db"
@@ -93,19 +96,38 @@ def clear_history(user_id):
     conn.commit()
     conn.close()
 
-# ==================== GROQ ====================
-client = Groq(api_key=GROQ_API_KEY)
+# ==================== GEMINI ====================
+client = genai.Client(api_key=GEMINI_API_KEY)
+
+CHAT_MODEL_PRIMARY = "gemini-2.5-flash"
+CHAT_MODEL_FALLBACK = "gemini-2.5-pro"
+TRANSCRIBE_MODEL = "gemini-2.5-flash"
+
+def _history_to_contents(history):
+    contents = []
+    for msg in history:
+        role = "model" if msg["role"] == "assistant" else "user"
+        contents.append(
+            types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])])
+        )
+    return contents
 
 async def transcribe_voice(file_path: str) -> str:
     try:
         with open(file_path, "rb") as audio_file:
-            transcription = client.audio.transcriptions.create(
-                file=(os.path.basename(file_path), audio_file.read()),
-                model="whisper-large-v3",
-                response_format="text",
-                language="ru",
-            )
-        return transcription.strip()
+            audio_bytes = audio_file.read()
+
+        response = client.models.generate_content(
+            model=TRANSCRIBE_MODEL,
+            contents=[
+                "Расшифруй это голосовое сообщение в текст на том языке, на котором "
+                "говорят. В ответе выведи только сам расшифрованный текст, без кавычек "
+                "и комментариев.",
+                types.Part.from_bytes(data=audio_bytes, mime_type="audio/ogg"),
+            ],
+        )
+        text = (response.text or "").strip()
+        return text if text else "ничего не разобрал"
     except Exception as e:
         logging.error(f"Transcription error: {e}")
         return "не смог разобрать голосовое бля"
@@ -113,35 +135,44 @@ async def transcribe_voice(file_path: str) -> str:
 def ask_ai(user_id, user_message):
     history = get_history(user_id, limit=3)
     history.append({"role": "user", "content": user_message})
+    contents = _history_to_contents(history)
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
+    config = types.GenerateContentConfig(
+        system_instruction=SYSTEM_PROMPT,
+        max_output_tokens=90,
+        temperature=0.9,
+    )
 
     try:
         # Основная быстрая модель
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=messages,
-            max_tokens=90,
-            temperature=0.9,
+        response = client.models.generate_content(
+            model=CHAT_MODEL_PRIMARY,
+            contents=contents,
+            config=config,
         )
-        return response.choices[0].message.content.strip()
+        text = (response.text or "").strip()
+        if text:
+            return text
+        raise ValueError("пустой ответ от модели")
 
     except Exception as e:
-        logging.error(f"Groq 8b error: {e}")
+        logging.error(f"Gemini {CHAT_MODEL_PRIMARY} error: {e}")
 
-        # Fallback на мощную модель
+        # Fallback на более мощную модель
         try:
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=messages,
-                max_tokens=90,
-                temperature=0.9,
+            response = client.models.generate_content(
+                model=CHAT_MODEL_FALLBACK,
+                contents=contents,
+                config=config,
             )
-            return response.choices[0].message.content.strip()
+            text = (response.text or "").strip()
+            if text:
+                return text
+            raise ValueError("пустой ответ от модели")
 
         except Exception as e2:
-            logging.error(f"Groq 70b fallback error: {e2}")
-            return "бля лимит кончился или groq лежит, подожди немного брат"
+            logging.error(f"Gemini {CHAT_MODEL_FALLBACK} fallback error: {e2}")
+            return "бля лимит кончился или gemini лежит, подожди немного брат"
 
 # ==================== ОБРАБОТЧИКИ ====================
 last_message_time = {}
@@ -287,7 +318,7 @@ def main():
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    print("бот эльбек запущен! (обновлённая версия)")
+    print("бот эльбек запущен! (версия на Gemini)")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
