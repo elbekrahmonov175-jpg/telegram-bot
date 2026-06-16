@@ -33,6 +33,8 @@ SYSTEM_PROMPT = """
 пиши строчными буквами
 без знаков препинания
 иногда матерись
+растягивай буквы
+отвечай коротко
 не говори что ты бот
 """
 
@@ -109,7 +111,7 @@ if not GEMINI_API_KEY:
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 CHAT_MODEL_PRIMARY = "gemini-2.5-flash"
-CHAT_MODEL_FALLBACK = "gemini-2.5-pro"
+CHAT_MODEL_FALLBACK = "gemini-2.5-flash-lite"
 TRANSCRIBE_MODEL = "gemini-2.5-flash"
 
 def _history_to_contents(history):
@@ -152,36 +154,37 @@ def ask_ai(user_id, user_message):
         temperature=0.9,
     )
 
-    try:
-        # Основная быстрая модель
-        response = client.models.generate_content(
-            model=CHAT_MODEL_PRIMARY,
-            contents=contents,
-            config=config,
-        )
-        text = (response.text or "").strip()
-        if text:
-            return text
-        raise ValueError("пустой ответ от модели")
-
-    except Exception as e:
-        logging.error(f"Gemini {CHAT_MODEL_PRIMARY} error: {e}")
-
-        # Fallback на более мощную модель
+    # Основная быстрая модель — с одной короткой повторной попыткой,
+    # если Google на секунду перегружен (503 "high demand")
+    for attempt in range(2):
         try:
             response = client.models.generate_content(
-                model=CHAT_MODEL_FALLBACK,
+                model=CHAT_MODEL_PRIMARY,
                 contents=contents,
                 config=config,
             )
             text = (response.text or "").strip()
             if text:
                 return text
-            raise ValueError("пустой ответ от модели")
+        except Exception as e:
+            logging.error(f"Gemini {CHAT_MODEL_PRIMARY} error (попытка {attempt + 1}): {e}")
+            if attempt == 0:
+                time.sleep(2)
 
-        except Exception as e2:
-            logging.error(f"Gemini {CHAT_MODEL_FALLBACK} fallback error: {e2}")
-            return "бля лимит кончился или gemini лежит, подожди немного брат"
+    # Fallback на другую модель
+    try:
+        response = client.models.generate_content(
+            model=CHAT_MODEL_FALLBACK,
+            contents=contents,
+            config=config,
+        )
+        text = (response.text or "").strip()
+        if text:
+            return text
+    except Exception as e2:
+        logging.error(f"Gemini {CHAT_MODEL_FALLBACK} fallback error: {e2}")
+
+    return "бля лимит кончился или gemini лежит, подожди немного брат"
 
 # ==================== ОБРАБОТЧИКИ ====================
 last_message_time = {}
