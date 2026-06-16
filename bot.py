@@ -20,7 +20,8 @@ from telegram.ext import (
 TELEGRAM_TOKEN = "8673766414:AAEJphWXAwRfGS8njXWabHNuh0oT2u3LWp0"
 
 # Ключ с aistudio.google.com -> "Get API key". Бесплатный, без биллинга.
-GEMINI_API_KEY = "ВСТАВЬ_СЮДА_СВОЙ_КЛЮЧ"
+# Задаётся в Railway: Variables -> New Variable -> имя GEMINI_API_KEY
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 OWNER_ID = 502740939
 DB_PATH = "bot.db"
@@ -97,6 +98,16 @@ def clear_history(user_id):
     conn.close()
 
 # ==================== GEMINI ====================
+GEMINI_API_KEY = (GEMINI_API_KEY or "").strip()
+# на случай, если при копировании ключа зацепился невидимый не-ASCII символ
+GEMINI_API_KEY = GEMINI_API_KEY.encode("ascii", "ignore").decode("ascii")
+
+if not GEMINI_API_KEY:
+    raise RuntimeError(
+        "GEMINI_API_KEY не задан. Добавь переменную окружения GEMINI_API_KEY "
+        "в настройках Railway (Variables -> New Variable)."
+    )
+
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 CHAT_MODEL_PRIMARY = "gemini-2.5-flash"
@@ -107,9 +118,8 @@ def _history_to_contents(history):
     contents = []
     for msg in history:
         role = "model" if msg["role"] == "assistant" else "user"
-        text = msg["content"].encode("utf-8").decode("utf-8")
         contents.append(
-            types.Content(role=role, parts=[types.Part.from_text(text=text)])
+            types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])])
         )
     return contents
 
@@ -135,7 +145,6 @@ async def transcribe_voice(file_path: str) -> str:
 
 def ask_ai(user_id, user_message):
     history = get_history(user_id, limit=3)
-    user_message = user_message.encode("utf-8").decode("utf-8")
     history.append({"role": "user", "content": user_message})
     contents = _history_to_contents(history)
 
@@ -312,7 +321,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== ЗАПУСК ====================
 def main():
     init_db()
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    app = (
+        ApplicationBuilder()
+        .token(TELEGRAM_TOKEN)
+        .connect_timeout(30)
+        .read_timeout(30)
+        .write_timeout(30)
+        .pool_timeout(30)
+        .build()
+    )
 
     app.add_handler(CommandHandler("myid", cmd_myid))
     app.add_handler(CommandHandler("clear", cmd_clear))
@@ -321,7 +338,9 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     print("бот эльбек запущен! (версия на Gemini)")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    # bootstrap_retries=-1 -> при сбое подключения на старте бот не падает,
+    # а пробует снова, пока не достучится до Telegram
+    app.run_polling(allowed_updates=Update.ALL_TYPES, bootstrap_retries=-1)
 
 if __name__ == "__main__":
     main()
