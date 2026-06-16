@@ -107,8 +107,9 @@ def _history_to_contents(history):
     contents = []
     for msg in history:
         role = "model" if msg["role"] == "assistant" else "user"
+        text = msg["content"].encode("utf-8").decode("utf-8")
         contents.append(
-            types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])])
+            types.Content(role=role, parts=[types.Part.from_text(text=text)])
         )
     return contents
 
@@ -134,6 +135,7 @@ async def transcribe_voice(file_path: str) -> str:
 
 def ask_ai(user_id, user_message):
     history = get_history(user_id, limit=3)
+    user_message = user_message.encode("utf-8").decode("utf-8")
     history.append({"role": "user", "content": user_message})
     contents = _history_to_contents(history)
 
